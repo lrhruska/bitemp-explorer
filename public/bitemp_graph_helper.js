@@ -100,47 +100,67 @@ function clearTextArea() {
   document.getElementById('newDocContents').value = '';
 }
 
+//https://gist.github.com/sente/1083506
+//to format pretty printing of xml
+function formatXml(xml, isEditing, chart) {
+  var formatted = '';
+  var reg = /(>)(<)(\/*)/g;
+  xml = xml.replace(reg, '$1\r\n$2$3');
+  var pad = 0;
+  jQuery.each(xml.split('\r\n'), function(index, node) {
+    var indent = 0;
+    if (node.match( /.+<\/\w[^>]*>$/ )) {
+      indent = 0;
+    } else if (node.match( /^<\/\w/ )) {
+      if (pad != 0) {
+        pad -= 1;
+      }
+    } else if (node.match( /^<\w[^>]*[^\/]>.*$/ )) {
+      indent = 1;
+    } else {
+      indent = 0;
+    }
+    var padding = '';
+    for (var i = 0; i < pad; i++) {
+      padding += '  ';
+    }
+    if(isEditing) {
+      if(node.indexOf('<' + chart.getSystemStart() + '>') > -1) {
+        node = '<'+chart.getSystemStart()+'>null</'+chart.getSystemStart()+'>'
+      }
+      else if(node.indexOf('<' + chart.getSystemEnd() + '>') > -1) {
+        node = '<'+chart.getSystemEnd()+'>null</'+chart.getSystemEnd()+'>'
+      }
+    }
+    formatted += padding + node + '\r\n';
+    pad += indent;
+  });
+
+  return formatted;
+}
+
 function fillText(data, isEditing, id, chart) {
   clearTextArea();
-
   var textArea = document.getElementById(id);
-
+  var xmlStr;
   if(data.contentType && data.contentType.indexOf('xml') > -1) {
-    var xmlStr = data.childNodes[0].outerHTML;
-    //https://gist.github.com/sente/1083506
-    //to format pretty printing of xml
-    function formatXml(xml) {
-      var formatted = '';
-      var reg = /(>)(<)(\/*)/g;
-      xml = xml.replace(reg, '$1\r\n$2$3');
-      var pad = 0;
-      jQuery.each(xml.split('\r\n'), function(index, node) {
-        var indent = 0;
-        if (node.match( /.+<\/\w[^>]*>$/ )) {
-          indent = 0;
-        } else if (node.match( /^<\/\w/ )) {
-          if (pad != 0) {
-            pad -= 1;
-          }
-        } else if (node.match( /^<\w[^>]*[^\/]>.*$/ )) {
-          indent = 1;
-        } else {
-          indent = 0;
-        }
-        var padding = '';
-        for (var i = 0; i < pad; i++) {
-          padding += '  ';
-        }
-        formatted += padding + node + '\r\n';
-        pad += indent;
-      });
-
-      return formatted;
+    xmlStr = data.childNodes[0].outerHTML;
+    xmlStr = xmlStr.replace(/>\s*/g, '>');  // Replace "> " with ">"
+    xmlStr = xmlStr.replace(/\s*</g, '<');  // Replace "< " with "<"
+    textArea.value = formatXml(xmlStr, isEditing, chart);
+  }
+  else if(data.xmlString) {
+    xmlStr = data.xmlString;
+    if(xmlStr.indexOf('<?xml version=') === 0) {
+      xmlStr = xmlStr.substring(xmlStr.indexOf('\n'));
     }
-    textArea.value = formatXml(xmlStr);
+    xmlStr = xmlStr.replace(/>\s*/g, '>');  // Replace "> " with ">"
+    xmlStr = xmlStr.replace(/\s*</g, '<');  // Replace "< " with "<"
+    textArea.value = formatXml(xmlStr, isEditing, chart);
   }
 
-  else {//view json doc
+  else {//format and view json doc
+    //data = JSON.parse(data);
     if (isEditing) {
       data[chart.getSystemStart()] = null;
       data[chart.getSystemEnd()] = null;
@@ -166,13 +186,19 @@ function cancel(chart) {
 }
 
 function save(chart) {
-  var data = document.getElementById('contents').value.replace(/\n/g, '');
-  data = data.replace(/\//g, '');
-  data = jQuery.parseJSON(data);
+  var data = document.getElementById('contents').value;//.replace(/\n/g, '');
+  //data = data.replace(/\//g, '');
+  console.log(chart.data());
+  if(chart.data()[0].contentType === 'application/json') {
+    data = jQuery.parseJSON(data);
+  }
+  else {
+    data = jQuery.parseXML(data);
+  }
   var uri = chart.getCurrentURI();
   var logURI = chart.getLogicalURI();
   var tempColl = chart.getTempColl();
-  var url = '/v1/documents?uri='+uri+'&temporal-collection='+tempColl;
+  var url = '/v1/documents?uri='+logURI+'&temporal-collection='+tempColl;
 
   if (document.getElementById('sysStartBox').value !== '') {
     var date = new Date(document.getElementById('sysStartBox').value).toISOString();
@@ -284,11 +310,6 @@ function saveNewDoc(chart) {
     type: 'PUT',
     data: data,
     processData: false,
-    url: '/v1/documents/?temporal-collection=' + selectedColl,
-    uri: newURI,
-    type: 'PUT',
-    data: data,
-    processData: false,
     success: function(data) {
       loadData(newURI);
     },
@@ -370,10 +391,10 @@ function getDocColls(uri) {
     error: function(jqXHR, textStatus, errorThrown) {
       console.log('problem');
     },
-    async: false,
+    async: false
   });
 
- return JSON.parse(docColl.responseText);
+  return JSON.parse(docColl.responseText);
 }
 
 /*
@@ -562,19 +583,19 @@ function initButtons() {
 }
 
 function initLsqt(chart) {
-  $.urlParam = function(name) {
-    var results = new RegExp('[\?&]' + name + '=([^&#]*)').exec(window.location.href);
-    if (results === null) {
-      return null;
-    }
-    else {
-      return results[1] || 0;
-    }
-  };
-  var uriParameter = $.urlParam('collection');
   if(chart.data().length === 0) {
     //empty collection
     return;
+  }
+  else {
+    var uriParameter;
+    var uri;
+    for(var i = 0; i < chart.data().length; i++) {
+      uri = chart.data()[i].uri;
+      if(uri.indexOf('.') === uri.lastIndexOf('.')) {
+        uriParameter = uri;
+      }
+    }
   }
 
   //gets temporal collection
@@ -583,7 +604,7 @@ function initLsqt(chart) {
   var collArr = getDocColls(uriParameter);
   var tempColl;
 
-  for(var i = 0; i < tempCollArr.length && !tempColl; i++) {
+  for(i = 0; i < tempCollArr.length && !tempColl; i++) {
     for(var j = 0; j < collArr.collections.length; j++) {
       if(tempCollArr[i].nameref === collArr.collections[j]) {
         tempColl = tempCollArr[i].nameref;
@@ -593,7 +614,7 @@ function initLsqt(chart) {
 
   //gets lsqt for the collection and sets label on home page.
   $.ajax({
-    url: 'http://localhost:3000/manage/v2/databases/Documents/temporal/collections/lsqt/properties?collection=' + tempColl + '&format=json',
+    url: '/manage/v2/databases/Documents/temporal/collections/lsqt/properties?collection=' + tempColl + '&format=json',
     async: false,
     type: 'GET',
     success: function(response, textStatus) {

@@ -382,7 +382,12 @@ var barChart = function() {
               setLastDoc(this);
             }
             if (chart.getViewing()) {
-              fillText(datum.content, false, 'contents');
+              if(datum.contentType === 'application/json') {
+                fillText(datum.content, false, 'contents');
+              }
+              else {
+                fillText(datum.content, false, 'contents');
+              }
             }
           }
         })
@@ -829,7 +834,10 @@ var barChart = function() {
           displayProperty = 'data';
         }
 
-        if (data.length > 0) {
+        if(data.length === 1) {
+          document.getElementById('uriEntered').innerHTML = 'You are displaying documents in: ' + data[0].uri.bold() + ' with property: ' + displayProperty.bold();
+        }
+        else if (data.length > 0) {
           document.getElementById('uriEntered').innerHTML = 'You are displaying documents in: ' + uriParameter.bold() + ' with property: ' + displayProperty.bold();
         }
         else {
